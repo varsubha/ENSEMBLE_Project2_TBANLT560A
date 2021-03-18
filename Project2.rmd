@@ -1,0 +1,398 @@
+---
+title: "Project-2"
+author: "Subha"
+date: "3/5/2021"
+output: word_document
+---
+
+Data Description:
+
+The BreastCancer dataset has 699 observations/records, 10 predictor variables and 1 target variable.
+Out of the 11 predictor variables,
+1- Character variable
+9- Nominal or ordinal variable
+1- Target class
+
+```{r }
+#install.packages("mlbench")
+library(caret)
+library(MASS)
+library(mlbench)
+library(tidyverse)
+data("BreastCancer")
+head(BreastCancer)
+summary(BreastCancer)
+
+str(BreastCancer)
+#Since Bare.nuclei has missing value,let us find the percentage of missing values to find out which method to implement to substitute missing values.
+dim(BreastCancer)
+number_rows <- nrow(BreastCancer)
+number_rows
+na_count <-sapply(BreastCancer, function(y) (sum(length(which(is.na(y))))/number_rows)*100)
+na_count
+
+paste0("Percentage of missing values in Bare.nuclei ",round(na_count[7],2), "%")
+
+```
+It can be found that there are only 2.29% of missing values in the variable Bare.nuclei. Either we can delete the rows containing missing values
+
+
+```{r }
+#Deleting the rows with NA
+
+BreastCancer.df <- na.omit(BreastCancer)
+
+# The first variable "ID" will not make any sense in modelling phase. It is better to remove it
+
+BreastCancer.df$Id <- NULL
+
+
+
+# LEt us check our dataset
+
+head(BreastCancer.df)
+
+```
+
+#Splitting the dataset
+```{r}
+#install.packages("caTools")
+library(caTools)
+set.seed(1234)
+split_ratio = sample.split(BreastCancer.df, SplitRatio = 0.7)
+train = subset(BreastCancer.df, split_ratio==TRUE)
+test = subset(BreastCancer.df, split_ratio==FALSE)
+dim(BreastCancer.df)
+print(dim(train)); print(dim(test))
+names(test)[10] <- "Result"
+test$Result <- as.factor(test$Result)
+
+names(test)
+
+names(train)[10] <- "Result"
+train$Result <- as.factor(train$Result)
+
+names(train)
+
+```
+
+Create multiple models using different classifiers/algorithms 
+
+1. SVM
+
+```{r}
+#install.packages("e1071")
+library(e1071)
+
+# svm requires tuning
+x.svm.tune <- tune(svm, Result~., data = train,
+                   ranges = list(gamma = 2^(-8:1), cost = 2^(0:4)),
+                   tunecontrol = tune.control(sampling = "fix")) 
+# display the tuning results (in text format)
+x.svm.tune #note the gamma and cost
+# If the tuning results are on the margin of the parameters (e.g., gamma = 2^-8), 
+# then widen the parameters.
+# I manually copied the cost and gamma from console messages above to parameters below.
+x.svm <- svm(Result~., data = train, cost=1, gamma=0.00390625	, probability = TRUE) #
+
+x.svm.pred <- predict(x.svm, type="class", newdata=test) #ensemble; only give the class
+x.svm.prob <- predict(x.svm, type="prob", newdata=test, probability = TRUE) # has to include probability = TRUE while type="prob" is not needed
+#t <- attr(x.svm.prob, "probabilities") # only give the probabilities
+table(x.svm.pred,test$Result)
+
+
+svm_accuracy <- round(((124 + 73) / nrow(test))*100,2)
+paste0("The Accuracy of SVM model is ", svm_accuracy, "%")
+
+```
+
+2.Naive Bayes
+
+```{r}
+#install.packages("klaR")
+
+library(klaR)
+mynb <- naiveBayes(Result ~ ., train, laplace = 0)
+mynb.pred <- predict(mynb,test,type="class")
+mynb.prob <- predict(mynb,test,type="raw")
+table(mynb.pred,test$Result)
+nb_accuracy <- round(((125 + 75) / nrow(test))*100,2)
+paste0("The Accuracy of NB model is ", nb_accuracy, "%")
+
+```
+3. Neural Network
+
+```{r}
+#install.packages("nnet")
+library(nnet)
+mynnet <- nnet(Result ~ ., train, size=2)
+
+mynnet.pred <- predict(mynnet,test,type="class")
+mynnet.prob <- predict(mynnet,test,type="raw")
+table(mynnet.pred,test$Result)
+
+neuralnet_accuracy <- round(((125 + 69) / nrow(test))*100,2)
+paste0("The Accuracy of neuralnetwork model is ", neuralnet_accuracy, "%")
+
+```
+4. Decision Trees
+
+```{r}
+#install.packages("MASS")
+library(MASS)
+library(rpart)
+library(rpart.plot)
+mytree <- rpart(Result ~ ., train)
+plot(mytree); text(mytree) 
+
+
+prp(mytree, type = 1, extra = 1, split.font = 1, varlen = -10)  
+
+#prediction
+# predict classes for the evaluation data set
+pred.pred <- predict(mytree, type="class", newdata=test)  # to ensemble
+# score the evaluation data set (extract the probabilities)
+pred.prob <- predict(mytree, type="prob", newdata=test)
+table(pred.pred,test$Result)
+dtaccuracy <- round(((119 +70) / nrow(test))*100,2)
+paste0("The Accuracy of Decision Trees model is ", dtaccuracy, "%")
+
+
+```
+
+5.conditional inference trees
+
+```{r}
+#install.packages("party")
+library(party)
+require(party)
+ct <- ctree(Result ~ ., data=train)
+plot(ct, main="Decision tree created using condition inference trees") 
+
+ct.pred <- predict(ct, newdata=test) 
+ct.prob <-  1- unlist(treeresponse(ct, test), use.names=F)[seq(1,nrow(test)*2,2)]
+table(ct.pred,test$Result)
+ctaccuracy <- round(((126 +71) / nrow(test))*100,2)
+paste0("The Accuracy of Decision Trees model is ", ctaccuracy, "%")
+
+```
+
+
+6. Random Forests
+
+```{r}
+#install.packages("randomForest")
+#install.packages("party")
+library(randomForest)
+library(party)
+#Applying conditional inference trees as base learners for random forests
+myrf <- randomForest(Result ~ ., train, control = cforest_unbiased(mtry = 9))
+
+rf.pred <- predict(myrf, newdata=test)
+
+table(rf.pred, test$Result)
+
+rfac <- round(((129 +71) / nrow(test))*100,2)
+paste0("The Accuracy of Random Forest model is ", rfac, "%")
+
+
+
+
+
+```
+
+
+7.Leave-1-Out Cross Validation (LOOCV)
+
+```{r}
+
+library(caret)
+
+ans <- numeric(length(BreastCancer.df[,1]))
+for (i in 1:length(BreastCancer.df[,1])) {
+  mytree <- rpart(Class ~ ., BreastCancer.df[-i,])
+  mytree.predloo <- predict(mytree,BreastCancer.df[i,],type="class")
+  ans[i] <- mytree.predloo
+  }
+
+ans <- as.factor(ans)
+ans <- factor(ans, levels=c(1,2),
+  labels=c('benign','malignant'))
+
+ans <- factor(ans,labels=levels(BreastCancer.df$Class))
+
+cm <- confusionMatrix(ans,BreastCancer.df$Class)
+acc <- cm$overall['Accuracy']*100
+
+accuracy_LOOCV <- round(acc,2)
+
+paste0("The Accuracy of LOOCV model is ", accuracy_LOOCV, "%")
+
+
+
+
+
+```
+
+
+8. bagging (bootstrap aggregating)
+
+```{r}
+# create model using bagging (bootstrap aggregating)
+require(ipred)
+ip <- bagging(Result ~ ., data=train) 
+
+ip.pred <- predict(ip, newdata=test)
+ip.prob <- predict(ip, type="prob", newdata=test)
+table(ip.pred,test$Result)
+bagg_accuracy <- round(((124 +68) / nrow(test))*100,2)
+
+paste0("The Accuracy of bagging model is ", bagg_accuracy, "%")
+```
+
+
+9.Quadratic Discriminant Analysis
+
+```{r}
+library(MASS)
+library(dplyr)
+train.num <- train %>% dplyr::select(-Result) %>% mutate_if(is.factor,as.character)%>% mutate_if(is.character,as.numeric)
+train.num$Result <- train$Result
+test.num <- test%>%dplyr::select(-Result) %>% mutate_if(is.factor,as.character)%>% mutate_if(is.character,as.numeric)
+test.num$Result <- test$Result
+
+qda <- qda(Result~., data = train.num) #qda, formula, right hand is non-factor
+qda.pred <- predict(qda, test.num)$class
+qda.prob <- predict(qda, test.num)$posterior 
+table(qda.pred,test.num$Result)
+qda_accuracy <- round(((121 +73) / nrow(test))*100,2)
+
+paste0("The Accuracy of QDA model is ", qda_accuracy, "%")
+
+```
+
+10.Regularised Discriminant Analysis
+
+```{r}
+#not able to use test
+
+library(klaR)
+rda <- rda(Result~., data = train)
+rda.pred <- predict(rda, test)$class
+rda.prob <- predict(rda, test)$posterior
+table(rda.pred,test$Result)
+rda_accuracy <- round(((124 +74) / nrow(test))*100,2)
+
+paste0("The Accuracy of RDA model is ", rda_accuracy, "%")
+
+```
+
+### Plot ROC curves to compare the performance of the individual classifiers.
+
+```{r}
+#load the ROCR package which draws the ROC curves
+#install.packages("ROCR")
+library(ROCR)
+
+
+# 1.svm
+svm.prob.rocr <- prediction(attr(x.svm.prob, "probabilities")[,2], test[,'Result'])
+x.svm.perf <- performance(svm.prob.rocr, "tpr","fpr")
+
+#2.nb
+x.nb.prob.rocr <- prediction(mynb.prob[,2], test[,'Result'])
+x.nb.perf <- performance(x.nb.prob.rocr, "tpr","fpr")
+
+#3.nnet
+x.nn.prob.rocr <- prediction(mynnet.prob, test[,'Result'])
+x.nn.perf <- performance(x.nn.prob.rocr, "tpr","fpr")
+
+#4. Decision Trees
+x.rp.prob.rocr <- prediction(pred.prob[,2], test[,'Result'])
+x.rp.perf <- performance(x.rp.prob.rocr, "tpr","fpr")
+
+#5. conditional inference trees
+x.ct.prob.rocr <- prediction(ct.prob, test[,'Result'])
+x.ct.perf <- performance(x.ct.prob.rocr, "tpr","fpr")
+
+#6. Bagging
+x.ip.prob.rocr <- prediction(ip.prob[,2], test[,'Result'])
+x.ip.perf <- performance(x.ip.prob.rocr, "tpr","fpr")
+
+#7.qda
+x.qda.prob.rocr <- prediction(qda.prob[,2], test[,'Result'])
+x.qda.perf <- performance(x.qda.prob.rocr, "tpr","fpr")
+
+#8.rda
+x.rda.prob.rocr <- prediction(rda.prob[,2], test[,'Result'])
+x.rda.perf <- performance(x.rda.prob.rocr, "tpr","fpr")
+
+
+```
+
+
+```{r}
+####### plot
+# Output the plot to a PNG file for display on web.  To draw to the screen, 
+# comment this line out.
+#png(filename="roc_curve_models1.png", width=700, height=700)
+
+#par(mfrow=c(1,2))
+plot(x.rp.perf, col=2, main="ROC curves comparing classification performance \n of 9 machine learning models") # 
+legend(0.6, 0.6, c('rpart', 'ctree','bagging','svm'), 2:6)# Draw a legend.
+plot(x.ct.perf, col=3, add=TRUE)# add=TRUE draws on the existing chart  #has to be run together.
+plot(x.ip.perf, col=5, add=TRUE)
+plot(x.svm.perf, col=6, add=TRUE)
+# Close and save the PNG file.
+#dev.off()
+
+#png(filename="roc_curve_models2.png", width=700, height=700)
+plot(x.nb.perf, col=7, main="ROC curves comparing classification performance \n of the other 4 machine learning models")
+legend(0.6, 0.6, c('naive bayes', 'neural network', 'qda','rda'), 7:10)
+plot(x.nn.perf, col=8, add=TRUE)
+plot(x.qda.perf, col=9, add=TRUE)
+plot(x.rda.perf, col=10, add=TRUE)
+#dev.off()
+```
+
+
+Let us use  “majority rule” ensemble approach by stacking the previous algorithms svm, naive bayes, neural network, decision tree,Leave-1-Out Cross Validation, Regularised Discriminant Analysis and random forest. The overall accuracy of the ensemble model is 98.04% 
+
+```{r}
+
+
+stackdf <- data.frame(cbind(pred.pred, ct.pred, rf.pred,ip.pred, x.svm.pred, mynb.pred,mynnet.pred,qda.pred,rda.pred))
+
+names(stackdf) <-c('Decision.Tree','Conditional.Inference.Tree','Random.Forest','Bootstrap','svm','naive.bayes','neutral.network','qda','rda')
+levels(stackdf$neutral.network) =c('1','2')
+
+finaldf <-stackdf%>% sapply(FUN = function(x)(ifelse(x=='1',0,1)))
+finaldf<- addmargins(finaldf, margin = 2) # table/arragy, margin =2 aggregate by col 
+finaldf <- data.frame(finaldf)
+finaldf$predition <- ifelse(finaldf$Sum >=5, 'malignant','benign')
+
+
+#confusion matrix 
+library(caret)
+finalcm <-confusionMatrix(as.factor(finaldf$predition), test$Result, positive = 'malignant')
+finalcm
+acc_ensemble <- finalcm$overall['Accuracy']*100
+
+Ensemble.acc <- round(acc_ensemble,2)
+
+
+paste0("Therefore the overall ensemble majority model accuracy is ",Ensemble.acc,"%")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
